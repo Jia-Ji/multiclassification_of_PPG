@@ -245,7 +245,7 @@ class EctopicsClassifier(pl.LightningModule):
                 axes = axes.reshape(1, -1)
             axes = axes.flatten()
         
-        label_names = ['Normal', 'Ectopic']
+        label_names = ['Normal', 'PVC']
         
         def _to_1d(signal_array):
             if isinstance(signal_array, torch.Tensor):
