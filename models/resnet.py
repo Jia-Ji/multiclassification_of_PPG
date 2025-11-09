@@ -61,6 +61,25 @@ class BasicBlock1D(nn.Module):
 
         return out
 
+
+class SelfAttention1D(nn.Module):
+    def __init__(self, embed_dim, num_heads=8, dropout=0.0):
+        super(SelfAttention1D, self).__init__()
+        self.attention = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout,
+                                               batch_first=True)
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        """
+        Args:
+            x (Tensor): shape (batch, channels, seq_len)
+        """
+        x_seq = x.transpose(1, 2)  # (batch, seq_len, channels)
+        attn_out, _ = self.attention(x_seq, x_seq, x_seq)
+        attn_out = self.norm(attn_out + x_seq)
+        return attn_out.transpose(1, 2)
+
+
 class ResNet2D(nn.Module):
     def __init__(self, block, signal_channels, layers, num_classes=2, dropout_p=0.2):
         super(ResNet2D, self).__init__()
@@ -131,7 +150,8 @@ class ResNet2D(nn.Module):
         return F.softmax(x, dim=1)
 
 class ResNet1D(nn.Module):
-    def __init__(self, block, num_layers, signal_channels, layer_norm, feat_dim, dropout_p):
+    def __init__(self, block, num_layers, signal_channels, layer_norm, feat_dim, dropout_p,
+                 attention_heads=8, use_attention=True):
         super(ResNet1D, self).__init__()
 
         assert num_layers in [10, 18, 34], f'ResNet{num_layers}: Unknown architecture! Number of layers has ' \
@@ -159,6 +179,10 @@ class ResNet1D(nn.Module):
         self.layer2 = self._make_layer(block, 128, layers[1], dropout_p, stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], dropout_p, stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], dropout_p, stride=2)
+
+        self.use_attention = use_attention
+        if self.use_attention:
+            self.attention = SelfAttention1D(512 * block.expansion, num_heads=attention_heads, dropout=dropout_p)
 
         # Global Average Pooling & Fully Connected Layer
         self.avgpool = nn.AdaptiveAvgPool1d(1)
@@ -207,6 +231,9 @@ class ResNet1D(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
+
+        if self.use_attention:
+            x = self.attention(x)
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
