@@ -3,7 +3,6 @@ import scipy.io
 import numpy as np
 import pandas as pd
 from skmultilearn.model_selection import iterative_train_test_split
-from sklearn.preprocessing import LabelEncoder
 
 # Load .mat file
 def load_mat_any(path):
@@ -13,7 +12,6 @@ def load_mat_any(path):
             return hdf5storage.loadmat(path)
     except Exception:
         pass
-    import scipy.io
     return scipy.io.loadmat(path, squeeze_me=True, struct_as_record=False)
 
 
@@ -36,27 +34,22 @@ csv_file_path = "./PPG_data/Compiled/merged_data_8022_3850_labeled.csv"
 df = pd.read_csv(csv_file_path)
 df['index'] = df.index
 
-# Replace 'PAC' and 'PVC' with 'ECT' in the 'ECGcat' column (Require Action)
-df['ECGcat'] = df['ECGcat'].replace(['PAC', 'PVC'], 'ECT')
-
-ECGcat = df['ECGcat'].to_numpy()
-
-# convert ECGcat from str to one-hot integer label (Require Action)
-mapping = {
+# Select target ECG classes and encode them (Require Action)
+label_mapping = {
     'NORM': 0,
-    'ECT':  1,
-    'NOISE': 2,
-    'UND': 2,
-    'VT': 2
+    'PVC': 1,
+    # 'PAC': 2,
 }
 
-ECGcat_encoded = [mapping[i] for i in ECGcat]
-ECGcat_encoded = np.array(ECGcat_encoded)
+target_class_order = ['NORM', 'PVC']
 
-# Remove rows where ECGcat is VT, NOISE, or UND (Require Action)
-df_filtered = df[~df['ECGcat'].isin(['VT', 'NOISE', 'UND'])]
 
-# print(df['ECGcat'].value_counts() )
+target_classes = set(label_mapping.keys())
+
+# Remove rows that are not part of the target classes (Require Action)
+df_filtered = df[df['ECGcat'].isin(target_classes)].copy()
+
+# print(df_filtered['ECGcat'].value_counts() )
 
 
 summary = (
@@ -96,9 +89,9 @@ ecg_x_train = ECG[df_train_index]
 ecg_x_val = ECG[df_val_index]
 ecg_x_test = ECG[df_test_index]
 
-y_train = ECGcat_encoded[df_train_index]
-y_val = ECGcat_encoded[df_val_index]
-y_test = ECGcat_encoded[df_test_index]
+y_train = df_train['ECGcat'].map(label_mapping).to_numpy()
+y_val = df_val['ECGcat'].map(label_mapping).to_numpy()
+y_test = df_test['ECGcat'].map(label_mapping).to_numpy()
 
 print(f"The shape of x_train is {x_train.shape}")
 print(f"The shape of x_val is {x_val.shape}")
@@ -118,15 +111,23 @@ print(f"The type of x_val is {type(x_val)}")
 print(f"The type of y_test is {type(y_test)}")
 print(f"The type of x_test is {type(x_test)}")
 #  check stratification
-print( 'Check stratification.......')
-def show_distribution(df_split, name):
-    dist = df_split['ECGcat'].value_counts(normalize=True) * 100
-    print(f"\n{name} PPG distribution (%):")
-    print(dist.round(2))
+print('Check stratification.......')
 
-show_distribution(df_train, "Train")
-show_distribution(df_val, "Validation")
-show_distribution(df_test, "Test")
+def compute_distribution(df_split):
+    dist = df_split['ECGcat'].value_counts(normalize=True) * 100
+    return dist.reindex(target_class_order).fillna(0).round(2)
+
+train_distribution = compute_distribution(df_train)
+val_distribution = compute_distribution(df_val)
+test_distribution = compute_distribution(df_test)
+
+def show_distribution(name, distribution):
+    print(f"\n{name} PPG distribution (%):")
+    print(distribution)
+
+show_distribution("Train", train_distribution)
+show_distribution("Validation", val_distribution)
+show_distribution("Test", test_distribution)
 
 # Should be empty sets
 print(set(train_patients) & set(val_patients))
@@ -150,6 +151,17 @@ if command == "yes":
         np.save(f, x_test)
     with open(os.path.join(output_dir, 'y_test.npy'), 'wb') as f:
         np.save(f, y_test)
+
+    distribution_path = os.path.join(output_dir, 'class_distribution.txt')
+    with open(distribution_path, 'w') as f:
+        for name, distribution in [
+            ("Train", train_distribution),
+            ("Validation", val_distribution),
+            ("Test", test_distribution),
+        ]:
+            f.write(f"{name} PPG distribution (%):\n")
+            f.write(distribution.to_string())
+            f.write("\n\n")
 
     # Save paired ECG splits for downstream visualization/analysis
     with open(os.path.join(output_dir, 'ECG_x_train.npy'), 'wb') as f:
